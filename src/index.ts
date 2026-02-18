@@ -15,8 +15,8 @@ import { searchRouter } from "./routes/search.js";
 const PORT = parseInt(process.env.PORT || "4021");
 const WALLET_ADDRESS = process.env.WALLET_ADDRESS || "";
 const FACILITATOR_URL =
-  process.env.FACILITATOR_URL || "https://x402.org/facilitator";
-const NETWORK = (process.env.NETWORK || "eip155:8453") as `${string}:${string}`; // Base mainnet
+  process.env.FACILITATOR_URL || "https://www.x402.org/facilitator";
+const NETWORK = (process.env.NETWORK || "eip155:84532") as `${string}:${string}`; // Base Sepolia testnet
 
 const app = express();
 app.use(express.json());
@@ -41,7 +41,7 @@ app.get("/", (_req, res) => {
     },
     payment: {
       protocol: "x402",
-      network: "Base (eip155:8453)",
+      network: `Base Sepolia (${NETWORK})`,
       token: "USDC",
       wallet: WALLET_ADDRESS,
     },
