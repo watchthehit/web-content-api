@@ -6,9 +6,6 @@
  */
 
 import express from "express";
-import { paymentMiddleware, x402ResourceServer } from "@x402/express";
-import { ExactEvmScheme } from "@x402/evm/exact/server";
-import { HTTPFacilitatorClient } from "@x402/core/server";
 import { extractRouter } from "./routes/extract.js";
 import { searchRouter } from "./routes/search.js";
 
@@ -22,6 +19,8 @@ const app = express();
 app.use(express.json());
 
 // ─── Service Info (free) ─────────────────────────────────────
+
+let paymentMode = "free";
 
 app.get("/", (_req, res) => {
   res.json({
@@ -44,6 +43,7 @@ app.get("/", (_req, res) => {
       network: `Base Sepolia (${NETWORK})`,
       token: "USDC",
       wallet: WALLET_ADDRESS,
+      mode: paymentMode,
     },
   });
 });
@@ -56,59 +56,77 @@ app.get("/health", (_req, res) => {
 
 // ─── x402 Payment Middleware ─────────────────────────────────
 
-if (WALLET_ADDRESS) {
-  const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
-  const resourceServer = new x402ResourceServer(facilitator).register(
-    NETWORK,
-    new ExactEvmScheme(),
-  );
+async function setupPayments() {
+  if (!WALLET_ADDRESS) {
+    console.log("No WALLET_ADDRESS set — running in free mode (no payments)");
+    return;
+  }
 
-  app.use(
-    paymentMiddleware(
-      {
-        "GET /api/extract": {
-          accepts: [
-            {
-              scheme: "exact",
-              price: "$0.002",
-              network: NETWORK,
-              payTo: WALLET_ADDRESS,
-            },
-          ],
-          description: "Extract clean text content from any URL",
-          mimeType: "application/json",
-        },
-        "GET /api/search": {
-          accepts: [
-            {
-              scheme: "exact",
-              price: "$0.003",
-              network: NETWORK,
-              payTo: WALLET_ADDRESS,
-            },
-          ],
-          description: "Search the web and return structured results",
-          mimeType: "application/json",
-        },
-      },
-      resourceServer,
-    ),
-  );
+  try {
+    const { paymentMiddleware, x402ResourceServer } = await import("@x402/express");
+    const { ExactEvmScheme } = await import("@x402/evm/exact/server");
+    const { HTTPFacilitatorClient } = await import("@x402/core/server");
 
-  console.log(`x402 payment enabled → ${WALLET_ADDRESS}`);
-  console.log(`Facilitator: ${FACILITATOR_URL}`);
-  console.log(`Network: ${NETWORK}`);
-} else {
-  console.log("No WALLET_ADDRESS set — running in free mode (no payments)");
+    const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+    const resourceServer = new x402ResourceServer(facilitator).register(
+      NETWORK,
+      new ExactEvmScheme(),
+    );
+
+    app.use(
+      paymentMiddleware(
+        {
+          "GET /api/extract": {
+            accepts: [
+              {
+                scheme: "exact",
+                price: "$0.002",
+                network: NETWORK,
+                payTo: WALLET_ADDRESS,
+              },
+            ],
+            description: "Extract clean text content from any URL",
+            mimeType: "application/json",
+          },
+          "GET /api/search": {
+            accepts: [
+              {
+                scheme: "exact",
+                price: "$0.003",
+                network: NETWORK,
+                payTo: WALLET_ADDRESS,
+              },
+            ],
+            description: "Search the web and return structured results",
+            mimeType: "application/json",
+          },
+        },
+        resourceServer,
+      ),
+    );
+
+    paymentMode = "x402";
+    console.log(`x402 payment enabled → ${WALLET_ADDRESS}`);
+    console.log(`Facilitator: ${FACILITATOR_URL}`);
+    console.log(`Network: ${NETWORK}`);
+  } catch (err: any) {
+    console.error(`x402 setup failed — running in free mode: ${err.message}`);
+    paymentMode = "free (x402 setup failed)";
+  }
 }
-
-// ─── Routes ──────────────────────────────────────────────────
-
-app.use(extractRouter);
-app.use(searchRouter);
 
 // ─── Start ───────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`Web Content API listening on http://localhost:${PORT}`);
-});
+async function start() {
+  await setupPayments();
+
+  // Routes are added AFTER middleware so x402 can intercept first
+  app.use(extractRouter);
+  app.use(searchRouter);
+
+  app.listen(PORT, () => {
+    console.log(`Web Content API listening on http://localhost:${PORT}`);
+  });
+}
+
+start();
