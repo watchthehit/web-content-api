@@ -1,0 +1,114 @@
+/**
+ * Web Content API
+ *
+ * Pay-per-call web content extraction and search.
+ * Agents pay with USDC on Base via x402.
+ */
+
+import express from "express";
+import { paymentMiddleware, x402ResourceServer } from "@x402/express";
+import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { HTTPFacilitatorClient } from "@x402/core/server";
+import { extractRouter } from "./routes/extract.js";
+import { searchRouter } from "./routes/search.js";
+
+const PORT = parseInt(process.env.PORT || "4021");
+const WALLET_ADDRESS = process.env.WALLET_ADDRESS || "";
+const FACILITATOR_URL =
+  process.env.FACILITATOR_URL || "https://x402.org/facilitator";
+const NETWORK = (process.env.NETWORK || "eip155:8453") as `${string}:${string}`; // Base mainnet
+
+const app = express();
+app.use(express.json());
+
+// ─── Service Info (free) ─────────────────────────────────────
+
+app.get("/", (_req, res) => {
+  res.json({
+    name: "Web Content API",
+    version: "1.0.0",
+    description:
+      "Pay-per-call web content extraction and search. Powered by x402.",
+    endpoints: {
+      "GET /api/extract?url=": {
+        price: "$0.002 USDC",
+        description: "Extract clean text content from any URL",
+      },
+      "GET /api/search?q=": {
+        price: "$0.003 USDC",
+        description: "Search the web and return structured results",
+      },
+    },
+    payment: {
+      protocol: "x402",
+      network: "Base (eip155:8453)",
+      token: "USDC",
+      wallet: WALLET_ADDRESS,
+    },
+  });
+});
+
+// ─── Health check (free) ─────────────────────────────────────
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// ─── x402 Payment Middleware ─────────────────────────────────
+
+if (WALLET_ADDRESS) {
+  const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+  const resourceServer = new x402ResourceServer(facilitator).register(
+    NETWORK,
+    new ExactEvmScheme(),
+  );
+
+  app.use(
+    paymentMiddleware(
+      {
+        "GET /api/extract": {
+          accepts: [
+            {
+              scheme: "exact",
+              price: "$0.002",
+              network: NETWORK,
+              payTo: WALLET_ADDRESS,
+            },
+          ],
+          description: "Extract clean text content from any URL",
+          mimeType: "application/json",
+        },
+        "GET /api/search": {
+          accepts: [
+            {
+              scheme: "exact",
+              price: "$0.003",
+              network: NETWORK,
+              payTo: WALLET_ADDRESS,
+            },
+          ],
+          description: "Search the web and return structured results",
+          mimeType: "application/json",
+        },
+      },
+      resourceServer,
+    ),
+  );
+
+  console.log(`x402 payment enabled → ${WALLET_ADDRESS}`);
+  console.log(`Facilitator: ${FACILITATOR_URL}`);
+  console.log(`Network: ${NETWORK}`);
+} else {
+  console.log("No WALLET_ADDRESS set — running in free mode (no payments)");
+}
+
+// ─── Routes ──────────────────────────────────────────────────
+
+app.use(extractRouter);
+app.use(searchRouter);
+
+// ─── Start ───────────────────────────────────────────────────
+
+app.listen(PORT, () => {
+  console.log(`Web Content API listening on http://localhost:${PORT}`);
+});
